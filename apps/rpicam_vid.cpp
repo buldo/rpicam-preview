@@ -71,9 +71,7 @@ static void event_loop(RPiCamEncoder &app)
 
 	app.OpenCamera();
 	app.ConfigureVideo(get_colourspace_flags(options->codec));
-	app.StartEncoder();
 	app.StartCamera();
-	auto start_time = std::chrono::high_resolution_clock::now();
 
 	// Monitoring for keypresses and signals.
 	signal(SIGUSR1, default_signal_handler);
@@ -104,22 +102,14 @@ static void event_loop(RPiCamEncoder &app)
 			output->Signal();
 
 		LOG(2, "Viewfinder frame " << count);
-		auto now = std::chrono::high_resolution_clock::now();
-		bool timeout = !options->frames && options->timeout &&
-					   ((now - start_time) > options->timeout.value);
-		bool frameout = options->frames && count >= options->frames;
-		if (timeout || frameout || key == 'x' || key == 'X')
+
+		if (key == 'x' || key == 'X')
 		{
-			if (timeout)
-				LOG(1, "Halting: reached timeout of " << options->timeout.get<std::chrono::milliseconds>()
-													  << " milliseconds.");
 			app.StopCamera(); // stop complains if encoder very slow to close
-			app.StopEncoder();
 			return;
 		}
 
 		CompletedRequestPtr &completed_request = std::get<CompletedRequestPtr>(msg.payload);
-		app.EncodeBuffer(completed_request, app.VideoStream());
 		app.ShowPreview(completed_request, app.VideoStream());
 	}
 }
@@ -132,8 +122,13 @@ int main(int argc, char *argv[])
 		VideoOptions *options = app.GetOptions();
 		if (options->Parse(argc, argv))
 		{
+			options->height = 480;
+			options->width = 640;
+			options->framerate = 60.0;
 			if (options->verbose >= 2)
+			{
 				options->Print();
+			}
 
 			event_loop(app);
 		}
