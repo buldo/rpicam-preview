@@ -53,9 +53,6 @@ subdir('utils')
 
 add_project_arguments(cpp_arguments, language : 'cpp')
 
-# Must be put after add_project_arguments as it defines shared library targets.
-subdir('post_processing_stages')
-
 # Generate a version string.
 version_cmd = [meson.project_source_root() / 'utils' / 'version.py', meson.project_version()]
 
