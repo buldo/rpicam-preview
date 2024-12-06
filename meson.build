@@ -46,7 +46,6 @@ rpicam_app_src = []
 rpicam_app_dep = [libcamera_dep, dl_dep]
 
 subdir('core')
-subdir('encoder')
 subdir('image')
 subdir('output')
 subdir('preview')

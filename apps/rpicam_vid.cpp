@@ -65,9 +65,6 @@ static int get_colourspace_flags(std::string const &codec)
 static void event_loop(RPiCamEncoder &app)
 {
 	VideoOptions const *options = app.GetOptions();
-	std::unique_ptr<Output> output = std::unique_ptr<Output>(Output::Create(options));
-	app.SetEncodeOutputReadyCallback(std::bind(&Output::OutputReady, output.get(), _1, _2, _3, _4));
-	app.SetMetadataReadyCallback(std::bind(&Output::MetadataReady, output.get(), _1));
 
 	app.OpenCamera();
 	app.ConfigureVideo(get_colourspace_flags(options->codec));
@@ -98,8 +95,6 @@ static void event_loop(RPiCamEncoder &app)
 		else if (msg.type != RPiCamEncoder::MsgType::RequestComplete)
 			throw std::runtime_error("unrecognised message!");
 		int key = get_key_or_signal(options, p);
-		if (key == '\n')
-			output->Signal();
 
 		LOG(2, "Viewfinder frame " << count);
 
