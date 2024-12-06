@@ -12,7 +12,6 @@
 #include <sys/stat.h>
 
 #include "core/rpicam_encoder.hpp"
-#include "output/output.hpp"
 
 using namespace std::placeholders;
 
