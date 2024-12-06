@@ -134,10 +134,7 @@ public:
 	void OpenCamera();
 	void CloseCamera();
 
-	void ConfigureViewfinder();
-	void ConfigureStill(unsigned int flags = FLAG_STILL_NONE);
 	void ConfigureVideo(unsigned int flags = FLAG_VIDEO_NONE);
-	void ConfigureZsl(unsigned int still_flags = FLAG_STILL_NONE);
 
 	void Teardown();
 	void StartCamera();
@@ -147,11 +144,8 @@ public:
 	void PostMessage(MsgType &t, MsgPayload &p);
 
 	Stream *GetStream(std::string const &name, StreamInfo *info = nullptr) const;
-	Stream *ViewfinderStream(StreamInfo *info = nullptr) const;
 	Stream *StillStream(StreamInfo *info = nullptr) const;
-	Stream *RawStream(StreamInfo *info = nullptr) const;
 	Stream *VideoStream(StreamInfo *info = nullptr) const;
-	Stream *LoresStream(StreamInfo *info = nullptr) const;
 	Stream *GetMainStream() const;
 
 	const CameraManager *GetCameraManager() const;
@@ -185,7 +179,6 @@ public:
 
 	friend class BufferWriteSync;
 	friend class BufferReadSync;
-	friend class PostProcessor;
 	friend struct Options;
 
 protected:
