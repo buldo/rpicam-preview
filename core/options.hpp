@@ -9,7 +9,6 @@
 
 #include <chrono>
 #include <fstream>
-#include <iostream>
 #include <optional>
 
 #include <boost/program_options.hpp>
@@ -17,28 +16,12 @@
 #include <libcamera/camera.h>
 #include <libcamera/camera_manager.h>
 #include <libcamera/control_ids.h>
-#include <libcamera/property_ids.h>
 #include <libcamera/transform.h>
 
 #include "core/logging.hpp"
-#include "core/version.hpp"
+#include "core/mode.hpp"
 
 static constexpr double DEFAULT_FRAMERATE = 30.0;
-
-struct Mode
-{
-	Mode() : Mode(0, 0, 0, true) {}
-	Mode(unsigned int w, unsigned int h, unsigned int b, bool p) : width(w), height(h), bit_depth(b), packed(p), framerate(0) {}
-	Mode(std::string const &mode_string);
-	unsigned int width;
-	unsigned int height;
-	unsigned int bit_depth;
-	bool packed;
-	double framerate;
-	libcamera::Size Size() const { return libcamera::Size(width, height); }
-	std::string ToString() const;
-	void update(const libcamera::Size &size, const std::optional<float> &fps);
-};
 
 template <typename DEFAULT>
 struct TimeVal
@@ -104,25 +87,17 @@ enum class Platform
 struct Options
 {
 	Options();
-	virtual ~Options() {}
 
 	bool help;
 	bool version;
-	bool list_cameras;
 	unsigned int verbose;
-	TimeVal<std::chrono::milliseconds> timeout;
 	std::string config_file;
-	std::string output;
-	std::string post_process_file;
-	std::string post_process_libs;
 	unsigned int width;
 	unsigned int height;
-	bool nopreview;
 	std::string preview;
 	bool fullscreen;
 	unsigned int preview_x, preview_y, preview_width, preview_height;
 	libcamera::Transform transform;
-	std::string roi;
 	float roi_x, roi_y, roi_width, roi_height;
 	TimeVal<std::chrono::microseconds> shutter;
 	float gain;
@@ -137,21 +112,15 @@ struct Options
 	float awb_gain_r;
 	float awb_gain_b;
 	bool flush;
-	unsigned int wrap;
 	float brightness;
 	float contrast;
 	float saturation;
 	float sharpness;
 	std::optional<float> framerate;
 	std::string denoise;
-	std::string info_text;
 	unsigned int viewfinder_width;
 	unsigned int viewfinder_height;
 	std::string tuning_file;
-	bool qt_preview;
-	unsigned int lores_width;
-	unsigned int lores_height;
-	bool lores_par;
 	unsigned int camera;
 	std::string mode_string;
 	Mode mode;
@@ -170,30 +139,20 @@ struct Options
 	std::optional<float> lens_position;
 	bool set_default_lens_position;
 	bool af_on_capture;
-	std::string metadata;
-	std::string metadata_format;
-	std::string hdr;
 	TimeVal<std::chrono::microseconds> flicker_period;
-	bool no_raw;
 
 	virtual bool Parse(int argc, char *argv[]);
 	virtual void Print() const;
 
-	void SetApp(RPiCamApp *app) { app_ = app; }
 	Platform GetPlatform() const { return platform_; };
 
 protected:
 	boost::program_options::options_description options_;
 
 private:
-	bool hflip_;
-	bool vflip_;
-	int rotation_;
 	float framerate_;
 	std::string lens_position_;
-	std::string timeout_;
 	std::string shutter_;
 	std::string flicker_period_;
-	RPiCamApp *app_;
 	Platform platform_ = Platform::UNKNOWN;
 };

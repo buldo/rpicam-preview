@@ -12,8 +12,6 @@
 #include <libcamera/controls.h>
 #include <libcamera/request.h>
 
-#include "core/metadata.hpp"
-
 struct CompletedRequest
 {
 	using BufferMap = libcamera::Request::BufferMap;
@@ -30,7 +28,6 @@ struct CompletedRequest
 	ControlList metadata;
 	Request *request;
 	float framerate;
-	Metadata post_process_metadata;
 };
 
 using CompletedRequestPtr = std::shared_ptr<CompletedRequest>;

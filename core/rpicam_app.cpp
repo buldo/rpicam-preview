@@ -7,7 +7,6 @@
 
 #include "preview/preview.hpp"
 
-#include "core/frame_info.hpp"
 #include "core/rpicam_app.hpp"
 #include "core/options.hpp"
 
@@ -25,30 +24,6 @@
 #include <libcamera/orientation.h>
 
 unsigned int RPiCamApp::verbosity = 1;
-
-static libcamera::PixelFormat mode_to_pixel_format(Mode const &mode)
-{
-	// The saving grace here is that we can ignore the Bayer order and return anything -
-	// our pipeline handler will give us back the order that works, whilst respecting the
-	// bit depth and packing. We may get a "stream adjusted" message, which we can ignore.
-
-	static std::vector<std::pair<Mode, libcamera::PixelFormat>> table = {
-		{ Mode(0, 0, 8, false), libcamera::formats::SBGGR8 },
-		{ Mode(0, 0, 8, true), libcamera::formats::SBGGR8 },
-		{ Mode(0, 0, 10, false), libcamera::formats::SBGGR10 },
-		{ Mode(0, 0, 10, true), libcamera::formats::SBGGR10_CSI2P },
-		{ Mode(0, 0, 12, false), libcamera::formats::SBGGR12 },
-		{ Mode(0, 0, 12, true), libcamera::formats::SBGGR12_CSI2P },
-		{ Mode(0, 0, 14, false), libcamera::formats::SBGGR14 },
-		{ Mode(0, 0, 14, true), libcamera::formats::SBGGR14_CSI2P },
-	};
-
-	auto it = std::find_if(table.begin(), table.end(), [&mode] (auto &m) { return mode.bit_depth == m.first.bit_depth && mode.packed == m.first.packed; });
-	if (it != table.end())
-		return it->second;
-
-	return libcamera::formats::SBGGR12_CSI2P;
-}
 
 static void set_pipeline_configuration(Platform platform)
 {
@@ -79,8 +54,6 @@ RPiCamApp::RPiCamApp(std::unique_ptr<Options> opts)
 {
 	if (!options_)
 		options_ = std::make_unique<Options>();
-
-	options_->SetApp(this);
 
 	Platform platform = options_->GetPlatform();
 	if (platform == Platform::LEGACY)
@@ -272,13 +245,8 @@ void RPiCamApp::ConfigureVideo(libcamera::ColorSpace colorSpace)
 {
 	LOG(2, "Configuring video...");
 
-	bool have_lores_stream = options_->lores_width && options_->lores_height;
 	StreamRoles stream_roles = { StreamRole::VideoRecording };
-	int lores_index = 1;
-	if (!options_->no_raw)
-		stream_roles.push_back(StreamRole::Raw), lores_index++;
-	if (have_lores_stream)
-		stream_roles.push_back(StreamRole::Viewfinder);
+
 	configuration_ = camera_->generateConfiguration(stream_roles);
 	if (!configuration_)
 		throw std::runtime_error("failed to generate video configuration");
@@ -296,43 +264,12 @@ void RPiCamApp::ConfigureVideo(libcamera::ColorSpace colorSpace)
 
 	cfg.colorSpace = colorSpace;
 
-
-	configuration_->orientation = libcamera::Orientation::Rotate0 * options_->transform;
-
-	if (!options_->no_raw)
-	{
-		options_->mode.update(configuration_->at(0).size, options_->framerate);
-		options_->mode = selectMode(options_->mode);
-
-		configuration_->at(1).size = options_->mode.Size();
-		configuration_->at(1).pixelFormat = mode_to_pixel_format(options_->mode);
-		configuration_->sensorConfig = libcamera::SensorConfiguration();
-		configuration_->sensorConfig->outputSize = options_->mode.Size();
-		configuration_->sensorConfig->bitDepth = options_->mode.bit_depth;
-		configuration_->at(1).bufferCount = configuration_->at(0).bufferCount;
-	}
-
-	if (have_lores_stream)
-	{
-		Size lores_size(options_->lores_width, options_->lores_height);
-		lores_size.alignDownTo(2, 2);
-		if (lores_size.width > configuration_->at(0).size.width ||
-			lores_size.height > configuration_->at(0).size.height)
-			throw std::runtime_error("Low res image larger than video");
-		configuration_->at(lores_index).pixelFormat = lores_format_;
-		configuration_->at(lores_index).size = lores_size;
-		configuration_->at(lores_index).bufferCount = configuration_->at(0).bufferCount;
-	}
 	configuration_->orientation = libcamera::Orientation::Rotate0 * options_->transform;
 
 	configureDenoise(options_->denoise == "auto" ? "cdn_fast" : options_->denoise);
 	setupCapture();
 
-	streams_["video"] = configuration_->at(0).stream();
-	if (!options_->no_raw)
-		streams_["raw"] = configuration_->at(1).stream();
-	if (have_lores_stream)
-		streams_["lores"] = configuration_->at(lores_index).stream();
+	stream_ = configuration_->at(0).stream();
 
 	LOG(2, "Video setup complete");
 }
@@ -357,7 +294,7 @@ void RPiCamApp::Teardown()
 
 	frame_buffers_.clear();
 
-	streams_.clear();
+	stream_ = nullptr;
 }
 
 void RPiCamApp::StartCamera()
@@ -389,12 +326,6 @@ void RPiCamApp::StartCamera()
 
 		LOG(2, "Using crop (main) " << crops.back().toString());
 
-		if (options_->lores_width != 0 && options_->lores_height != 0 && !options_->lores_par)
-		{
-			crops.push_back(crops.back());
-			LOG(2, "Using crop (lores) " << crops.back().toString());
-		}
-
 		if (options_->GetPlatform() == Platform::VC4)
 			controls_.set(controls::ScalerCrop, crops[0]);
 		else
@@ -424,10 +355,7 @@ void RPiCamApp::StartCamera()
 	// as long as possible so that we get whatever the exposure profile wants.
 	if (!controls_.get(controls::FrameDurationLimits))
 	{
-		if (StillStream())
-			controls_.set(controls::FrameDurationLimits,
-						  libcamera::Span<const int64_t, 2>({ INT64_C(100), INT64_C(1000000000) }));
-		else if (!options_->framerate || options_->framerate.value() > 0)
+		if (!options_->framerate || options_->framerate.value() > 0)
 		{
 			int64_t frame_time = 1000000 / options_->framerate.value_or(DEFAULT_FRAMERATE); // in us
 			controls_.set(controls::FrameDurationLimits,
@@ -458,9 +386,6 @@ void RPiCamApp::StartCamera()
 		controls_.set(controls::Saturation, options_->saturation);
 	if (!controls_.get(controls::Sharpness))
 		controls_.set(controls::Sharpness, options_->sharpness);
-	if (!controls_.get(controls::HdrMode) &&
-	    (options_->hdr == "auto" || options_->hdr == "single-exp"))
-		controls_.set(controls::HdrMode, controls::HdrModeSingleExposure);
 
 	// AF Controls, where supported and not already set
 	if (!controls_.get(controls::AfMode) && camera_->controls().count(&controls::AfMode) > 0)
@@ -487,8 +412,10 @@ void RPiCamApp::StartCamera()
 		// trigger a scan now (but don't move the lens when capturing a still).
 		// If an application requires more control over AF triggering, it may
 		// override this behaviour with prior settings of AfMode or AfTrigger.
-		if (!StillStream() && !controls_.get(controls::AfTrigger))
+		if (!controls_.get(controls::AfTrigger))
+		{
 			controls_.set(controls::AfTrigger, controls::AfTriggerStart);
+		}
 	}
 	else if ((options_->lens_position || options_->set_default_lens_position) &&
 			 camera_->controls().count(&controls::LensPosition) > 0 && !controls_.get(controls::LensPosition))
@@ -624,35 +551,9 @@ void RPiCamApp::PostMessage(MsgType &t, MsgPayload &p)
 	msg_queue_.Post(Msg(t, std::move(p)));
 }
 
-libcamera::Stream *RPiCamApp::GetStream(std::string const &name, StreamInfo *info) const
+libcamera::Stream *RPiCamApp::GetStream() const
 {
-	auto it = streams_.find(name);
-	if (it == streams_.end())
-		return nullptr;
-	if (info)
-		*info = GetStreamInfo(it->second);
-	return it->second;
-}
-
-libcamera::Stream *RPiCamApp::StillStream(StreamInfo *info) const
-{
-	return GetStream("still", info);
-}
-
-libcamera::Stream *RPiCamApp::VideoStream(StreamInfo *info) const
-{
-	return GetStream("video", info);
-}
-
-libcamera::Stream *RPiCamApp::GetMainStream() const
-{
-	for (auto &p : streams_)
-	{
-		if (p.first == "viewfinder" || p.first == "still" || p.first == "video")
-			return p.second;
-	}
-
-	return nullptr;
+	return stream_;
 }
 
 const libcamera::CameraManager *RPiCamApp::GetCameraManager() const
@@ -890,9 +791,6 @@ void RPiCamApp::previewThread()
 		BufferReadSync r(this, buffer);
 		libcamera::Span span = r.Get()[0];
 
-		// Fill the frame info with the ControlList items and ancillary bits.
-		FrameInfo frame_info(item.completed_request);
-
 		int fd = buffer->planes()[0].fd.get();
 		{
 			std::lock_guard<std::mutex> lock(preview_mutex_);
@@ -906,11 +804,6 @@ void RPiCamApp::previewThread()
 		}
 		preview_frames_displayed_++;
 		preview_->Show(fd, span, info);
-		if (!options_->info_text.empty())
-		{
-			std::string s = frame_info.ToString(options_->info_text);
-			preview_->SetInfoText(s);
-		}
 	}
 }
 

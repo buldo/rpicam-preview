@@ -34,10 +34,9 @@
 #include "core/completed_request.hpp"
 #include "core/dma_heaps.hpp"
 #include "core/stream_info.hpp"
-
-struct Options;
-class Preview;
-struct Mode;
+#include "core/options.hpp"
+#include "preview/preview.hpp"
+#include "core/mode.hpp"
 
 namespace controls = libcamera::controls;
 namespace properties = libcamera::properties;
@@ -143,10 +142,7 @@ public:
 	Msg Wait();
 	void PostMessage(MsgType &t, MsgPayload &p);
 
-	Stream *GetStream(std::string const &name, StreamInfo *info = nullptr) const;
-	Stream *StillStream(StreamInfo *info = nullptr) const;
-	Stream *VideoStream(StreamInfo *info = nullptr) const;
-	Stream *GetMainStream() const;
+	Stream *GetStream() const;
 
 	const CameraManager *GetCameraManager() const;
 	std::vector<std::shared_ptr<libcamera::Camera>> GetCameras()
@@ -179,7 +175,6 @@ public:
 
 	friend class BufferWriteSync;
 	friend class BufferReadSync;
-	friend struct Options;
 
 protected:
 	std::unique_ptr<Options> options_;
@@ -247,7 +242,7 @@ private:
 	bool camera_acquired_ = false;
 	std::unique_ptr<CameraConfiguration> configuration_;
 	std::map<FrameBuffer *, std::vector<libcamera::Span<uint8_t>>> mapped_buffers_;
-	std::map<std::string, Stream *> streams_;
+	Stream * stream_ = nullptr;
 	DmaHeap dma_heap_;
 	std::map<Stream *, std::vector<std::unique_ptr<FrameBuffer>>> frame_buffers_;
 	std::vector<std::unique_ptr<Request>> requests_;

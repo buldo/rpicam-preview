@@ -11,7 +11,9 @@
 #include <sys/signalfd.h>
 #include <sys/stat.h>
 
-#include "core/rpicam_encoder.hpp"
+#include "core/rpicam_app.hpp"
+#include "core/logging.hpp"
+#include "core/options.hpp"
 
 using namespace std::placeholders;
 
@@ -24,7 +26,7 @@ static void default_signal_handler(int signal_number)
 	LOG(1, "Received signal " << signal_number);
 }
 
-static int get_key_or_signal(VideoOptions const *options, pollfd p[1])
+static int get_key_or_signal(Options const *options, pollfd p[1])
 {
 	int key = 0;
 	if (signal_received == SIGINT)
@@ -37,9 +39,9 @@ static int get_key_or_signal(VideoOptions const *options, pollfd p[1])
 
 // The main even loop for the application.
 
-static void event_loop(RPiCamEncoder &app)
+static void event_loop(RPiCamApp &app)
 {
-	VideoOptions const *options = app.GetOptions();
+	Options const *options = app.GetOptions();
 
 	app.OpenCamera();
 
@@ -62,7 +64,7 @@ static void event_loop(RPiCamEncoder &app)
 
 	for (unsigned int count = 0; ; count++)
 	{
-		RPiCamEncoder::Msg msg = app.Wait();
+		RPiCamApp::Msg msg = app.Wait();
 		if (msg.type == RPiCamApp::MsgType::Timeout)
 		{
 			LOG_ERROR("ERROR: Device timeout detected, attempting a restart!!!");
@@ -70,9 +72,9 @@ static void event_loop(RPiCamEncoder &app)
 			app.StartCamera();
 			continue;
 		}
-		if (msg.type == RPiCamEncoder::MsgType::Quit)
+		if (msg.type == RPiCamApp::MsgType::Quit)
 			return;
-		else if (msg.type != RPiCamEncoder::MsgType::RequestComplete)
+		else if (msg.type != RPiCamApp::MsgType::RequestComplete)
 			throw std::runtime_error("unrecognised message!");
 		int key = get_key_or_signal(options, p);
 
@@ -85,7 +87,7 @@ static void event_loop(RPiCamEncoder &app)
 		}
 
 		CompletedRequestPtr &completed_request = std::get<CompletedRequestPtr>(msg.payload);
-		app.ShowPreview(completed_request, app.VideoStream());
+		app.ShowPreview(completed_request, app.GetStream());
 	}
 }
 
@@ -93,8 +95,8 @@ int main(int argc, char *argv[])
 {
 	try
 	{
-		RPiCamEncoder app;
-		VideoOptions *options = app.GetOptions();
+		RPiCamApp app;
+		Options *options = app.GetOptions();
 		if (options->Parse(argc, argv))
 		{
 			options->height = 480;
