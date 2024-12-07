@@ -154,10 +154,6 @@ Options::Options()
 			"Height of viewfinder frames from the camera (distinct from the preview window size)")
 		("tuning-file", value<std::string>(&tuning_file)->default_value("-"),
 			"Name of camera tuning file to use, omit this option for libcamera default behaviour")
-		("mode", value<std::string>(&mode_string),
-			"Camera mode as W:H:bit-depth:packing, where packing is P (packed) or U (unpacked)")
-		("viewfinder-mode", value<std::string>(&viewfinder_mode_string),
-			"Camera mode for preview as W:H:bit-depth:packing, where packing is P (packed) or U (unpacked)")
 		("buffer-count", value<unsigned int>(&buffer_count)->default_value(0), "Number of in-flight requests (and buffers) configured for video, raw, and still.")
 		("viewfinder-buffer-count", value<unsigned int>(&viewfinder_buffer_count)->default_value(0), "Number of in-flight requests (and buffers) configured for preview window.")
 		("autofocus-mode", value<std::string>(&afMode)->default_value("default"),
@@ -341,9 +337,6 @@ bool Options::Parse(int argc, char *argv[])
 	saturation = std::clamp(saturation, 0.0f, 15.99f); // limits are arbitrary..
 	sharpness = std::clamp(sharpness, 0.0f, 15.99f); // limits are arbitrary..
 
-	mode = Mode(mode_string);
-	viewfinder_mode = Mode(viewfinder_mode_string);
-
 	if (width == 0)
 	{
 		width = 640;
@@ -425,8 +418,6 @@ void Options::Print() const
 		std::cerr << "    lens-position: " << lens_position_ << std::endl;
 	}
 
-	std::cerr << "    mode: " << mode.ToString() << std::endl;
-	std::cerr << "    viewfinder-mode: " << viewfinder_mode.ToString() << std::endl;
 	if (buffer_count > 0)
 		std::cerr << "    buffer-count: " << buffer_count << std::endl;
 	if (viewfinder_buffer_count > 0)

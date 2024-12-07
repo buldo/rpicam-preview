@@ -8,7 +8,6 @@ rpicam_app_src += files([
     'dma_heaps.cpp',
     'rpicam_app.cpp',
     'options.cpp',
-    'mode.cpp',
 ])
 
 core_headers = files([
@@ -20,7 +19,6 @@ core_headers = files([
     'options.hpp',
     'stream_info.hpp',
     'version.hpp',
-    'mode.hpp',
 ])
 
 install_headers(core_headers, subdir: meson.project_name() / 'core')

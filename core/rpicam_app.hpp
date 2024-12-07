@@ -36,7 +36,6 @@
 #include "core/stream_info.hpp"
 #include "core/options.hpp"
 #include "preview/preview.hpp"
-#include "core/mode.hpp"
 
 namespace controls = libcamera::controls;
 namespace properties = libcamera::properties;
@@ -235,7 +234,6 @@ private:
 	void stopPreview();
 	void previewThread();
 	void configureDenoise(const std::string &denoise_mode);
-	Mode selectMode(const Mode &mode) const;
 
 	std::unique_ptr<CameraManager> camera_manager_;
 	std::shared_ptr<Camera> camera_;
@@ -267,7 +265,5 @@ private:
 	std::mutex control_mutex_;
 	ControlList controls_;
 	// Other:
-	uint64_t last_timestamp_;
-	uint64_t sequence_ = 0;
 	libcamera::PixelFormat lores_format_ = libcamera::formats::YUV420;
 };

@@ -192,55 +192,6 @@ void RPiCamApp::CloseCamera()
 		LOG(2, "Camera closed");
 }
 
-Mode RPiCamApp::selectMode(const Mode &mode) const
-{
-	auto scoreFormat = [](double desired, double actual) -> double
-	{
-		double score = desired - actual;
-		// Smaller desired dimensions are preferred.
-		if (score < 0.0)
-			score = (-score) / 8;
-		// Penalise non-exact matches.
-		if (actual != desired)
-			score *= 2;
-
-		return score;
-	};
-
-	constexpr float penalty_AR = 1500.0;
-	constexpr float penalty_BD = 500.0;
-	constexpr float penalty_FPS = 2000.0;
-
-	double best_score = std::numeric_limits<double>::max(), score;
-	SensorMode best_mode;
-
-	LOG(1, "Mode selection for " << mode.ToString());
-	for (const auto &sensor_mode : sensor_modes_)
-	{
-		double reqAr = static_cast<double>(mode.width) / mode.height;
-		double fmtAr = static_cast<double>(sensor_mode.size.width) / sensor_mode.size.height;
-
-		// Similar scoring mechanism that our pipeline handler does internally.
-		score = scoreFormat(mode.width, sensor_mode.size.width);
-		score += scoreFormat(mode.height, sensor_mode.size.height);
-		score += penalty_AR * scoreFormat(reqAr, fmtAr);
-		if (mode.framerate)
-			score += penalty_FPS * std::abs(mode.framerate - std::min(sensor_mode.fps, mode.framerate));
-		score += penalty_BD * abs((int)(mode.bit_depth - sensor_mode.depth()));
-
-		if (score <= best_score)
-		{
-			best_score = score;
-			best_mode.size = sensor_mode.size;
-			best_mode.format = sensor_mode.format;
-		}
-
-		LOG(1, "    " << sensor_mode.ToString() << " - Score: " << score);
-	}
-
-	return { best_mode.size.width, best_mode.size.height, best_mode.depth(), mode.packed };
-}
-
 void RPiCamApp::ConfigureVideo(libcamera::ColorSpace colorSpace)
 {
 	LOG(2, "Configuring video...");
@@ -441,7 +392,6 @@ void RPiCamApp::StartCamera()
 		throw std::runtime_error("failed to start camera");
 	controls_.clear();
 	camera_started_ = true;
-	last_timestamp_ = 0;
 
 	camera_->requestCompleted.connect(this, &RPiCamApp::requestComplete);
 
@@ -713,23 +663,12 @@ void RPiCamApp::requestComplete(Request *request)
 			throw std::runtime_error("failed to sync dma buf on request complete");
 	}
 
-	CompletedRequest *r = new CompletedRequest(sequence_++, request);
+	CompletedRequest *r = new CompletedRequest(request);
 	CompletedRequestPtr payload(r, [this](CompletedRequest *cr) { this->queueRequest(cr); });
 	{
 		std::lock_guard<std::mutex> lock(completed_requests_mutex_);
 		completed_requests_.insert(r);
 	}
-
-	// We calculate the instantaneous framerate in case anyone wants it.
-	// Use the sensor timestamp if possible as it ought to be less glitchy than
-	// the buffer timestamps.
-	auto ts = payload->metadata.get(controls::SensorTimestamp);
-	uint64_t timestamp = ts ? *ts : payload->buffers.begin()->second->metadata().timestamp;
-	if (last_timestamp_ == 0 || last_timestamp_ == timestamp)
-		payload->framerate = 0;
-	else
-		payload->framerate = 1e9 / (timestamp - last_timestamp_);
-	last_timestamp_ = timestamp;
 
 	this->msg_queue_.Post(Msg(MsgType::RequestComplete, std::move(payload)));
 }

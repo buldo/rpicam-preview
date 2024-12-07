@@ -18,16 +18,14 @@ struct CompletedRequest
 	using ControlList = libcamera::ControlList;
 	using Request = libcamera::Request;
 
-	CompletedRequest(unsigned int seq, Request *r)
-		: sequence(seq), buffers(r->buffers()), metadata(r->metadata()), request(r)
+	CompletedRequest(Request *r)
+		: buffers(r->buffers()), request(r)
 	{
 		r->reuse();
 	}
-	unsigned int sequence;
+
 	BufferMap buffers;
-	ControlList metadata;
 	Request *request;
-	float framerate;
 };
 
 using CompletedRequestPtr = std::shared_ptr<CompletedRequest>;

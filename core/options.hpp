@@ -19,7 +19,6 @@
 #include <libcamera/transform.h>
 
 #include "core/logging.hpp"
-#include "core/mode.hpp"
 
 static constexpr double DEFAULT_FRAMERATE = 30.0;
 
@@ -122,10 +121,6 @@ struct Options
 	unsigned int viewfinder_height;
 	std::string tuning_file;
 	unsigned int camera;
-	std::string mode_string;
-	Mode mode;
-	std::string viewfinder_mode_string;
-	Mode viewfinder_mode;
 	unsigned int buffer_count;
 	unsigned int viewfinder_buffer_count;
 	std::string afMode;
