@@ -24,36 +24,6 @@
 
 namespace fs = std::filesystem;
 
-static const std::map<int, std::string> cfa_map =
-{
-	{ properties::draft::ColorFilterArrangementEnum::RGGB, "RGGB" },
-	{ properties::draft::ColorFilterArrangementEnum::GRBG, "GRBG" },
-	{ properties::draft::ColorFilterArrangementEnum::GBRG, "GBRG" },
-	{ properties::draft::ColorFilterArrangementEnum::RGB, "RGB" },
-	{ properties::draft::ColorFilterArrangementEnum::MONO, "MONO" },
-};
-
-static const std::map<libcamera::PixelFormat, unsigned int> bayer_formats =
-{
-	{ libcamera::formats::SRGGB10_CSI2P, 10 },
-	{ libcamera::formats::SGRBG10_CSI2P, 10 },
-	{ libcamera::formats::SBGGR10_CSI2P, 10 },
-	{ libcamera::formats::R10_CSI2P,     10 },
-	{ libcamera::formats::SGBRG10_CSI2P, 10 },
-	{ libcamera::formats::SRGGB12_CSI2P, 12 },
-	{ libcamera::formats::SGRBG12_CSI2P, 12 },
-	{ libcamera::formats::SBGGR12_CSI2P, 12 },
-	{ libcamera::formats::SGBRG12_CSI2P, 12 },
-	{ libcamera::formats::SRGGB14_CSI2P, 14 },
-	{ libcamera::formats::SGRBG14_CSI2P, 14 },
-	{ libcamera::formats::SBGGR14_CSI2P, 14 },
-	{ libcamera::formats::SGBRG14_CSI2P, 14 },
-	{ libcamera::formats::SRGGB16,       16 },
-	{ libcamera::formats::SGRBG16,       16 },
-	{ libcamera::formats::SBGGR16,       16 },
-	{ libcamera::formats::SGBRG16,       16 },
-};
-
 Platform get_platform()
 {
 	bool unknown = false;
@@ -116,8 +86,6 @@ Options::Options()
 			"Set the output image height (0 = use default value)")
 		("preview,p", value<std::string>(&preview)->default_value("0,0,0,0"),
 			"Set the preview window dimensions, given as x,y,width,height e.g. 0,0,640,480")
-		("fullscreen,f", value<bool>(&fullscreen)->default_value(false)->implicit_value(true),
-			"Use a fullscreen preview window")
 		("shutter", value<std::string>(&shutter_)->default_value("0"),
 			"Set a fixed shutter speed. If no units are provided default to us")
 		("analoggain", value<float>(&gain)->default_value(0),
@@ -134,8 +102,6 @@ Options::Options()
 			"Set the AWB mode (auto, incandescent, tungsten, fluorescent, indoor, daylight, cloudy, custom)")
 		("awbgains", value<std::string>(&awbgains)->default_value("0,0"),
 			"Set explict red and blue gains (disable the automatic AWB algorithm)")
-		("flush", value<bool>(&flush)->default_value(false)->implicit_value(true),
-			"Flush output data as soon as possible")
 		("brightness", value<float>(&brightness)->default_value(0),
 			"Adjust the brightness of the output images, in the range -1.0 to 1.0")
 		("contrast", value<float>(&contrast)->default_value(1.0),
@@ -148,14 +114,9 @@ Options::Options()
 			"Set the fixed framerate for preview and video modes")
 		("denoise", value<std::string>(&denoise)->default_value("auto"),
 			"Sets the Denoise operating mode: auto, off, cdn_off, cdn_fast, cdn_hq")
-		("viewfinder-width", value<unsigned int>(&viewfinder_width)->default_value(0),
-			"Width of viewfinder frames from the camera (distinct from the preview window size")
-		("viewfinder-height", value<unsigned int>(&viewfinder_height)->default_value(0),
-			"Height of viewfinder frames from the camera (distinct from the preview window size)")
 		("tuning-file", value<std::string>(&tuning_file)->default_value("-"),
 			"Name of camera tuning file to use, omit this option for libcamera default behaviour")
 		("buffer-count", value<unsigned int>(&buffer_count)->default_value(0), "Number of in-flight requests (and buffers) configured for video, raw, and still.")
-		("viewfinder-buffer-count", value<unsigned int>(&viewfinder_buffer_count)->default_value(0), "Number of in-flight requests (and buffers) configured for preview window.")
 		("autofocus-mode", value<std::string>(&afMode)->default_value("default"),
 			"Control to set the mode of the AF (autofocus) algorithm.(manual, auto, continuous)")
 		("autofocus-range", value<std::string>(&afRange)->default_value("normal"),
@@ -249,23 +210,6 @@ bool Options::Parse(int argc, char *argv[])
 
 	// Set the verbosity
 	RPiCamApp::verbosity = verbose;
-
-	if (sscanf(preview.c_str(), "%u,%u,%u,%u", &preview_x, &preview_y, &preview_width, &preview_height) != 4)
-		preview_x = preview_y = preview_width = preview_height = 0; // use default window
-
-	transform = Transform::Identity;
-
-	bool ok;
-	Transform rot = transformFromRotation(0, &ok);
-
-	if (!ok)
-		throw std::runtime_error("illegal rotation value");
-
-	transform = rot * transform;
-	if (!!(transform & Transform::Transpose))
-		throw std::runtime_error("transforms requiring transpose not supported");
-
-	roi_x = roi_y = roi_width = roi_height = 0; // don't set digital zoom
 
 	if (sscanf(afWindow.c_str(), "%f,%f,%f,%f", &afWindow_x, &afWindow_y, &afWindow_width, &afWindow_height) != 4)
 		afWindow_x = afWindow_y = afWindow_width = afWindow_height = 0; // don't set auto focus windows
@@ -362,28 +306,14 @@ void Options::Print() const
 	std::cerr << "    width: " << width << std::endl;
 	std::cerr << "    height: " << height << std::endl;
 
-	if (fullscreen)
-	{
-		std::cerr << "    preview: fullscreen" << std::endl;
-	}
-	else if (preview_width == 0 || preview_height == 0)
-	{
-		std::cerr << "    preview: default" << std::endl;
-	}
-	else
-	{
-		std::cerr << "    preview: " << preview_x << "," << preview_y << "," << preview_width << "," << preview_height << std::endl;
-	}
+	std::cerr << "    roi: all" << std::endl;
 
-	std::cerr << "    transform: " << transformToString(transform) << std::endl;
-	if (roi_width == 0 || roi_height == 0)
-		std::cerr << "    roi: all" << std::endl;
-	else
-		std::cerr << "    roi: " << roi_x << "," << roi_y << "," << roi_width << "," << roi_height << std::endl;
 	if (shutter)
 		std::cerr << "    shutter: " << shutter.get() << "us" << std::endl;
+
 	if (gain)
 		std::cerr << "    gain: " << gain << std::endl;
+
 	std::cerr << "    metering: " << metering << std::endl;
 	std::cerr << "    exposure: " << exposure << std::endl;
 	if (flicker_period)
@@ -392,15 +322,12 @@ void Options::Print() const
 	std::cerr << "    awb: " << awb << std::endl;
 	if (awb_gain_r && awb_gain_b)
 		std::cerr << "    awb gains: red " << awb_gain_r << " blue " << awb_gain_b << std::endl;
-	std::cerr << "    flush: " << (flush ? "true" : "false") << std::endl;
 	std::cerr << "    brightness: " << brightness << std::endl;
 	std::cerr << "    contrast: " << contrast << std::endl;
 	std::cerr << "    saturation: " << saturation << std::endl;
 	std::cerr << "    sharpness: " << sharpness << std::endl;
 	std::cerr << "    framerate: " << framerate.value_or(DEFAULT_FRAMERATE) << std::endl;
 	std::cerr << "    denoise: " << denoise << std::endl;
-	std::cerr << "    viewfinder-width: " << viewfinder_width << std::endl;
-	std::cerr << "    viewfinder-height: " << viewfinder_height << std::endl;
 	std::cerr << "    tuning-file: " << (tuning_file == "-" ? "(libcamera)" : tuning_file) << std::endl;
 	if (afMode_index != -1)
 		std::cerr << "    autofocus-mode: " << afMode << std::endl;
@@ -420,6 +347,4 @@ void Options::Print() const
 
 	if (buffer_count > 0)
 		std::cerr << "    buffer-count: " << buffer_count << std::endl;
-	if (viewfinder_buffer_count > 0)
-		std::cerr << "    viewfinder-buffer-count: " << viewfinder_buffer_count << std::endl;
 }

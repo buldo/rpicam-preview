@@ -215,7 +215,7 @@ void RPiCamApp::ConfigureVideo(libcamera::ColorSpace colorSpace)
 
 	cfg.colorSpace = colorSpace;
 
-	configuration_->orientation = libcamera::Orientation::Rotate0 * options_->transform;
+	configuration_->orientation = libcamera::Orientation::Rotate0;
 
 	configureDenoise(options_->denoise == "auto" ? "cdn_fast" : options_->denoise);
 	setupCapture();
@@ -257,23 +257,10 @@ void RPiCamApp::StartCamera()
 	// We don't overwrite anything the application may have set before calling us.
 	if (!controls_.get(controls::ScalerCrop) && !controls_.get(controls::rpi::ScalerCrops))
 	{
-		const Rectangle sensor_area = camera_->controls().at(&controls::ScalerCrop).max().get<Rectangle>();
 		const Rectangle default_crop = camera_->controls().at(&controls::ScalerCrop).def().get<Rectangle>();
-		std::vector<Rectangle> crops;
 
-		if (options_->roi_width != 0 && options_->roi_height != 0)
-		{
-			int x = options_->roi_x * sensor_area.width;
-			int y = options_->roi_y * sensor_area.height;
-			unsigned int w = options_->roi_width * sensor_area.width;
-			unsigned int h = options_->roi_height * sensor_area.height;
-			crops.push_back({ x, y, w, h });
-			crops.back().translateBy(sensor_area.topLeft());
-		}
-		else
-		{
-			crops.push_back(default_crop);
-		}
+		std::vector<Rectangle> crops;
+		crops.push_back(default_crop);
 
 		LOG(2, "Using crop (main) " << crops.back().toString());
 
