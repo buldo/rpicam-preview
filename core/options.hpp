@@ -93,7 +93,6 @@ struct Options
 	std::string config_file;
 	unsigned int width;
 	unsigned int height;
-	std::string preview;
 	TimeVal<std::chrono::microseconds> shutter;
 	float gain;
 	std::string metering;
