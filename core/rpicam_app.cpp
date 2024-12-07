@@ -268,7 +268,7 @@ Mode RPiCamApp::selectMode(const Mode &mode) const
 	return { best_mode.size.width, best_mode.size.height, best_mode.depth(), mode.packed };
 }
 
-void RPiCamApp::ConfigureVideo(unsigned int flags)
+void RPiCamApp::ConfigureVideo(libcamera::ColorSpace colorSpace)
 {
 	LOG(2, "Configuring video...");
 
@@ -293,12 +293,10 @@ void RPiCamApp::ConfigureVideo(unsigned int flags)
 		cfg.size.width = options_->width;
 	if (options_->height)
 		cfg.size.height = options_->height;
-	if (flags & FLAG_VIDEO_JPEG_COLOURSPACE)
-		cfg.colorSpace = libcamera::ColorSpace::Sycc;
-	else if (cfg.size.width >= 1280 || cfg.size.height >= 720)
-		cfg.colorSpace = libcamera::ColorSpace::Rec709;
-	else
-		cfg.colorSpace = libcamera::ColorSpace::Smpte170m;
+
+	cfg.colorSpace = colorSpace;
+
+
 	configuration_->orientation = libcamera::Orientation::Rotate0 * options_->transform;
 
 	if (!options_->no_raw)

@@ -28,35 +28,11 @@ static int get_key_or_signal(VideoOptions const *options, pollfd p[1])
 {
 	int key = 0;
 	if (signal_received == SIGINT)
+	{
 		return 'x';
-	if (options->keypress)
-	{
-		poll(p, 1, 0);
-		if (p[0].revents & POLLIN)
-		{
-			char *user_string = nullptr;
-			size_t len;
-			[[maybe_unused]] size_t r = getline(&user_string, &len, stdin);
-			key = user_string[0];
-		}
 	}
-	if (options->signal)
-	{
-		if (signal_received == SIGUSR1)
-			key = '\n';
-		else if ((signal_received == SIGUSR2) || (signal_received == SIGPIPE))
-			key = 'x';
-		signal_received = 0;
-	}
-	return key;
-}
 
-static int get_colourspace_flags(std::string const &codec)
-{
-	if (codec == "mjpeg" || codec == "yuv420")
-		return RPiCamEncoder::FLAG_VIDEO_JPEG_COLOURSPACE;
-	else
-		return RPiCamEncoder::FLAG_VIDEO_NONE;
+	return key;
 }
 
 // The main even loop for the application.
@@ -66,7 +42,12 @@ static void event_loop(RPiCamEncoder &app)
 	VideoOptions const *options = app.GetOptions();
 
 	app.OpenCamera();
-	app.ConfigureVideo(get_colourspace_flags(options->codec));
+
+	// libcamera::ColorSpace::Sycc;
+	// libcamera::ColorSpace::Rec709;
+	// libcamera::ColorSpace::Smpte170m;
+
+	app.ConfigureVideo(libcamera::ColorSpace::Sycc);
 	app.StartCamera();
 
 	// Monitoring for keypresses and signals.

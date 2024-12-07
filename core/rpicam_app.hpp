@@ -134,7 +134,7 @@ public:
 	void OpenCamera();
 	void CloseCamera();
 
-	void ConfigureVideo(unsigned int flags = FLAG_VIDEO_NONE);
+	void ConfigureVideo(libcamera::ColorSpace colorSpace);
 
 	void Teardown();
 	void StartCamera();
