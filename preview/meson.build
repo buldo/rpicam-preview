@@ -17,11 +17,11 @@ if drm_deps.found()
 endif
 
 enable_egl = false
-x11_deps = dependency('x11', required : get_option('enable_egl'))
 epoxy_deps = dependency('epoxy', required : get_option('enable_egl'))
+gbm_deps = dependency('gbm', required : get_option('enable_egl'))
 
-if x11_deps.found() and epoxy_deps.found()
-    rpicam_app_dep += [x11_deps, epoxy_deps]
+if epoxy_deps.found() and gbm_deps.found()
+    rpicam_app_dep += [epoxy_deps, gbm_deps]
     rpicam_app_src += files('egl_preview.cpp')
     cpp_arguments += '-DLIBEGL_PRESENT=1'
     enable_egl = true
