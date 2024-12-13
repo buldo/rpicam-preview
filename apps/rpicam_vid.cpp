@@ -11,8 +11,9 @@
 #include <sys/signalfd.h>
 #include <sys/stat.h>
 
-#include "core/rpicam_encoder.hpp"
-#include "output/output.hpp"
+#include "core/rpicam_app.hpp"
+#include "core/logging.hpp"
+#include "core/options.hpp"
 
 using namespace std::placeholders;
 
@@ -25,55 +26,31 @@ static void default_signal_handler(int signal_number)
 	LOG(1, "Received signal " << signal_number);
 }
 
-static int get_key_or_signal(VideoOptions const *options, pollfd p[1])
+static int get_key_or_signal(Options const *options, pollfd p[1])
 {
 	int key = 0;
 	if (signal_received == SIGINT)
+	{
 		return 'x';
-	if (options->keypress)
-	{
-		poll(p, 1, 0);
-		if (p[0].revents & POLLIN)
-		{
-			char *user_string = nullptr;
-			size_t len;
-			[[maybe_unused]] size_t r = getline(&user_string, &len, stdin);
-			key = user_string[0];
-		}
 	}
-	if (options->signal)
-	{
-		if (signal_received == SIGUSR1)
-			key = '\n';
-		else if ((signal_received == SIGUSR2) || (signal_received == SIGPIPE))
-			key = 'x';
-		signal_received = 0;
-	}
-	return key;
-}
 
-static int get_colourspace_flags(std::string const &codec)
-{
-	if (codec == "mjpeg" || codec == "yuv420")
-		return RPiCamEncoder::FLAG_VIDEO_JPEG_COLOURSPACE;
-	else
-		return RPiCamEncoder::FLAG_VIDEO_NONE;
+	return key;
 }
 
 // The main even loop for the application.
 
-static void event_loop(RPiCamEncoder &app)
+static void event_loop(RPiCamApp &app)
 {
-	VideoOptions const *options = app.GetOptions();
-	std::unique_ptr<Output> output = std::unique_ptr<Output>(Output::Create(options));
-	app.SetEncodeOutputReadyCallback(std::bind(&Output::OutputReady, output.get(), _1, _2, _3, _4));
-	app.SetMetadataReadyCallback(std::bind(&Output::MetadataReady, output.get(), _1));
+	Options const *options = app.GetOptions();
 
 	app.OpenCamera();
-	app.ConfigureVideo(get_colourspace_flags(options->codec));
-	app.StartEncoder();
+
+	// libcamera::ColorSpace::Sycc;
+	// libcamera::ColorSpace::Rec709;
+	// libcamera::ColorSpace::Smpte170m;
+
+	app.ConfigureVideo(libcamera::ColorSpace::Sycc);
 	app.StartCamera();
-	auto start_time = std::chrono::high_resolution_clock::now();
 
 	// Monitoring for keypresses and signals.
 	signal(SIGUSR1, default_signal_handler);
@@ -87,7 +64,7 @@ static void event_loop(RPiCamEncoder &app)
 
 	for (unsigned int count = 0; ; count++)
 	{
-		RPiCamEncoder::Msg msg = app.Wait();
+		RPiCamApp::Msg msg = app.Wait();
 		if (msg.type == RPiCamApp::MsgType::Timeout)
 		{
 			LOG_ERROR("ERROR: Device timeout detected, attempting a restart!!!");
@@ -95,32 +72,22 @@ static void event_loop(RPiCamEncoder &app)
 			app.StartCamera();
 			continue;
 		}
-		if (msg.type == RPiCamEncoder::MsgType::Quit)
+		if (msg.type == RPiCamApp::MsgType::Quit)
 			return;
-		else if (msg.type != RPiCamEncoder::MsgType::RequestComplete)
+		else if (msg.type != RPiCamApp::MsgType::RequestComplete)
 			throw std::runtime_error("unrecognised message!");
 		int key = get_key_or_signal(options, p);
-		if (key == '\n')
-			output->Signal();
 
 		LOG(2, "Viewfinder frame " << count);
-		auto now = std::chrono::high_resolution_clock::now();
-		bool timeout = !options->frames && options->timeout &&
-					   ((now - start_time) > options->timeout.value);
-		bool frameout = options->frames && count >= options->frames;
-		if (timeout || frameout || key == 'x' || key == 'X')
+
+		if (key == 'x' || key == 'X')
 		{
-			if (timeout)
-				LOG(1, "Halting: reached timeout of " << options->timeout.get<std::chrono::milliseconds>()
-													  << " milliseconds.");
 			app.StopCamera(); // stop complains if encoder very slow to close
-			app.StopEncoder();
 			return;
 		}
 
 		CompletedRequestPtr &completed_request = std::get<CompletedRequestPtr>(msg.payload);
-		app.EncodeBuffer(completed_request, app.VideoStream());
-		app.ShowPreview(completed_request, app.VideoStream());
+		app.ShowPreview(completed_request, app.GetStream());
 	}
 }
 
@@ -128,12 +95,17 @@ int main(int argc, char *argv[])
 {
 	try
 	{
-		RPiCamEncoder app;
-		VideoOptions *options = app.GetOptions();
+		RPiCamApp app;
+		Options *options = app.GetOptions();
 		if (options->Parse(argc, argv))
 		{
+			options->height = 480;
+			options->width = 640;
+			options->framerate = 60.0;
 			if (options->verbose >= 2)
+			{
 				options->Print();
+			}
 
 			event_loop(app);
 		}

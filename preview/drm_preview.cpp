@@ -174,15 +174,12 @@ void DrmPreview::findCrtc()
 		throw std::runtime_error("connector supports no mode");
 	}
 
-	if (options_->fullscreen || width_ == 0 || height_ == 0)
-	{
-		drmModeCrtc *crtc = drmModeGetCrtc(drmfd_, crtcId_);
-		x_ = crtc->x;
-		y_ = crtc->y;
-		width_ = crtc->width;
-		height_ = crtc->height;
-		drmModeFreeCrtc(crtc);
-	}
+	drmModeCrtc *crtc = drmModeGetCrtc(drmfd_, crtcId_);
+	x_ = crtc->x;
+	y_ = crtc->y;
+	width_ = crtc->width;
+	height_ = crtc->height;
+	drmModeFreeCrtc(crtc);
 
 	drmModeFreeConnector(c);
 	drmModeFreeResources(res);
@@ -246,19 +243,16 @@ DrmPreview::DrmPreview(Options const *options) : Preview(options), last_fd_(-1),
 {
 	drmfd_ = drmOpen("vc4", NULL);
 	if (drmfd_ < 0)
+	{
 		throw std::runtime_error("drmOpen failed: " + std::string(ERRSTR));
-
-	x_ = options_->preview_x;
-	y_ = options_->preview_y;
-	width_ = options_->preview_width;
-	height_ = options_->preview_height;
-	screen_width_ = 0;
-	screen_height_ = 0;
+	}
 
 	try
 	{
 		if (!drmIsMaster(drmfd_))
+		{
 			throw std::runtime_error("DRM preview unavailable - not master");
+		}
 
 		conId_ = 0;
 		findCrtc();
@@ -271,14 +265,9 @@ DrmPreview::DrmPreview(Options const *options) : Preview(options), last_fd_(-1),
 		throw;
 	}
 
-	// Default behaviour here is to go fullscreen.
-	if (options_->fullscreen || width_ == 0 || height_ == 0 || x_ + width_ > screen_width_ ||
-		y_ + height_ > screen_height_)
-	{
-		x_ = y_ = 0;
-		width_ = screen_width_;
-		height_ = screen_height_;
-	}
+	x_ = y_ = 0;
+	width_ = screen_width_;
+	height_ = screen_height_;
 }
 
 DrmPreview::~DrmPreview()

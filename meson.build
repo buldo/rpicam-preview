@@ -46,16 +46,10 @@ rpicam_app_src = []
 rpicam_app_dep = [libcamera_dep, dl_dep]
 
 subdir('core')
-subdir('encoder')
-subdir('image')
-subdir('output')
 subdir('preview')
 subdir('utils')
 
 add_project_arguments(cpp_arguments, language : 'cpp')
-
-# Must be put after add_project_arguments as it defines shared library targets.
-subdir('post_processing_stages')
 
 # Generate a version string.
 version_cmd = [meson.project_source_root() / 'utils' / 'version.py', meson.project_version()]
@@ -93,13 +87,7 @@ install_symlink('libcamera_app.so',
 subdir('apps')
 
 summary({
-            'libav encoder' : enable_libav,
             'drm preview' : enable_drm,
             'egl preview' : enable_egl,
-            'qt preview' : enable_qt,
-            'OpenCV postprocessing' : enable_opencv,
-            'TFLite postprocessing' : enable_tflite,
-            'Hailo postprocessing' : enable_hailo,
-            'IMX500 postprocessing' : get_option('enable_imx500'),
         },
         bool_yn : true, section : 'Build configuration')

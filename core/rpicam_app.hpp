@@ -33,12 +33,9 @@
 #include "core/buffer_sync.hpp"
 #include "core/completed_request.hpp"
 #include "core/dma_heaps.hpp"
-#include "core/post_processor.hpp"
 #include "core/stream_info.hpp"
-
-struct Options;
-class Preview;
-struct Mode;
+#include "core/options.hpp"
+#include "preview/preview.hpp"
 
 namespace controls = libcamera::controls;
 namespace properties = libcamera::properties;
@@ -135,10 +132,7 @@ public:
 	void OpenCamera();
 	void CloseCamera();
 
-	void ConfigureViewfinder();
-	void ConfigureStill(unsigned int flags = FLAG_STILL_NONE);
-	void ConfigureVideo(unsigned int flags = FLAG_VIDEO_NONE);
-	void ConfigureZsl(unsigned int still_flags = FLAG_STILL_NONE);
+	void ConfigureVideo(libcamera::ColorSpace colorSpace);
 
 	void Teardown();
 	void StartCamera();
@@ -147,13 +141,7 @@ public:
 	Msg Wait();
 	void PostMessage(MsgType &t, MsgPayload &p);
 
-	Stream *GetStream(std::string const &name, StreamInfo *info = nullptr) const;
-	Stream *ViewfinderStream(StreamInfo *info = nullptr) const;
-	Stream *StillStream(StreamInfo *info = nullptr) const;
-	Stream *RawStream(StreamInfo *info = nullptr) const;
-	Stream *VideoStream(StreamInfo *info = nullptr) const;
-	Stream *LoresStream(StreamInfo *info = nullptr) const;
-	Stream *GetMainStream() const;
+	Stream *GetStream() const;
 
 	const CameraManager *GetCameraManager() const;
 	std::vector<std::shared_ptr<libcamera::Camera>> GetCameras()
@@ -186,8 +174,6 @@ public:
 
 	friend class BufferWriteSync;
 	friend class BufferReadSync;
-	friend class PostProcessor;
-	friend struct Options;
 
 protected:
 	std::unique_ptr<Options> options_;
@@ -248,14 +234,13 @@ private:
 	void stopPreview();
 	void previewThread();
 	void configureDenoise(const std::string &denoise_mode);
-	Mode selectMode(const Mode &mode) const;
 
 	std::unique_ptr<CameraManager> camera_manager_;
 	std::shared_ptr<Camera> camera_;
 	bool camera_acquired_ = false;
 	std::unique_ptr<CameraConfiguration> configuration_;
 	std::map<FrameBuffer *, std::vector<libcamera::Span<uint8_t>>> mapped_buffers_;
-	std::map<std::string, Stream *> streams_;
+	Stream * stream_ = nullptr;
 	DmaHeap dma_heap_;
 	std::map<Stream *, std::vector<std::unique_ptr<FrameBuffer>>> frame_buffers_;
 	std::vector<std::unique_ptr<Request>> requests_;
@@ -280,8 +265,5 @@ private:
 	std::mutex control_mutex_;
 	ControlList controls_;
 	// Other:
-	uint64_t last_timestamp_;
-	uint64_t sequence_ = 0;
-	PostProcessor post_processor_;
 	libcamera::PixelFormat lores_format_ = libcamera::formats::YUV420;
 };
