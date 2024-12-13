@@ -341,21 +341,21 @@ static int match_config_to_visual(
  * Calculate an accurate refresh rate from 'mode'.
  * The result is in mHz.
  */
-static int refresh_rate(drmModeModeInfo *mode)
-{
-	int res = (mode->clock * 1000000LL / mode->htotal + mode->vtotal / 2) / mode->vtotal;
-
-	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
-		res *= 2;
-
-	if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
-		res /= 2;
-
-	if (mode->vscan > 1)
-		res /= mode->vscan;
-
-	return res;
-}
+// static int refresh_rate(drmModeModeInfo *mode)
+// {
+// 	int res = (mode->clock * 1000000LL / mode->htotal + mode->vtotal / 2) / mode->vtotal;
+//
+// 	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
+// 		res *= 2;
+//
+// 	if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
+// 		res /= 2;
+//
+// 	if (mode->vscan > 1)
+// 		res /= mode->vscan;
+//
+// 	return res;
+// }
 
 EglPreview::EglPreview(Options const *options) : Preview(options), last_fd_(-1), first_time_(true)
 {
