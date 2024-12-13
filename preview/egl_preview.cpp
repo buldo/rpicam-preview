@@ -337,6 +337,26 @@ static int match_config_to_visual(
 	return -1;
 }
 
+/*
+ * Calculate an accurate refresh rate from 'mode'.
+ * The result is in mHz.
+ */
+static int refresh_rate(drmModeModeInfo *mode)
+{
+	int res = (mode->clock * 1000000LL / mode->htotal + mode->vtotal / 2) / mode->vtotal;
+
+	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
+		res *= 2;
+
+	if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
+		res /= 2;
+
+	if (mode->vscan > 1)
+		res /= mode->vscan;
+
+	return res;
+}
+
 EglPreview::EglPreview(Options const *options) : Preview(options), last_fd_(-1), first_time_(true)
 {
 	device = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
@@ -354,8 +374,27 @@ EglPreview::EglPreview(Options const *options) : Preview(options), last_fd_(-1),
 	}
 
 	connectorId = connector->connector_id;
-	mode = connector->modes[0];
+	auto modesArray = std::vector<drmModeModeInfo>(connector->modes, connector->modes + connector->count_modes);
+	//mode = connector->modes[0];
+	auto searchResult = std::find_if(
+		modesArray.begin(), modesArray.end(),
+		[](const auto& x) { return x.hdisplay == 1920 && x.vdisplay == 1080;});
+	if (searchResult == modesArray.end())
+	{
+		throw std::runtime_error("Unable to find mode");
+	}
+	mode = *searchResult;
 	printf("resolution: %ix%i\n", mode.hdisplay, mode.vdisplay);
+
+	// for (int j = 0; j < connector->count_modes; ++j) {
+	// 	drmModeModeInfo *mode = &connector->modes[j];
+	//
+	// 	printf("  hdisplay:%i vdisplay:%i flags:%x interlace:%s refresh_rate:%.02f\n",
+	// 		mode->hdisplay, mode->vdisplay,
+	// 		mode->flags,
+	// 		mode->flags & DRM_MODE_FLAG_INTERLACE ? "i" : "",
+	// 		refresh_rate(mode) / 1000.0);
+	// }
 
 	encoder = findEncoder(connector);
 	if (encoder == NULL)
