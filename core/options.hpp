@@ -126,6 +126,7 @@ struct Options
 	bool set_default_lens_position;
 	bool af_on_capture;
 	TimeVal<std::chrono::microseconds> flicker_period;
+	bool useGlesPreview;
 
 	virtual bool Parse(int argc, char *argv[]);
 	virtual void Print() const;
