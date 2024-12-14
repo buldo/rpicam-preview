@@ -93,7 +93,6 @@ struct Options
 	std::string config_file;
 	unsigned int width;
 	unsigned int height;
-	std::string preview;
 	TimeVal<std::chrono::microseconds> shutter;
 	float gain;
 	std::string metering;
@@ -127,6 +126,7 @@ struct Options
 	bool set_default_lens_position;
 	bool af_on_capture;
 	TimeVal<std::chrono::microseconds> flicker_period;
+	bool useGlesPreview;
 
 	virtual bool Parse(int argc, char *argv[]);
 	virtual void Print() const;

@@ -723,11 +723,7 @@ void RPiCamApp::previewThread()
 			// the reference to the shared_ptr moves to the map here
 			preview_completed_requests_[fd] = std::move(item.completed_request);
 		}
-		if (preview_->Quit())
-		{
-			LOG(2, "Preview window has quit");
-			msg_queue_.Post(Msg(MsgType::Quit));
-		}
+
 		preview_frames_displayed_++;
 		preview_->Show(fd, span, info);
 	}

@@ -99,9 +99,18 @@ int main(int argc, char *argv[])
 		Options *options = app.GetOptions();
 		if (options->Parse(argc, argv))
 		{
-			options->height = 480;
-			options->width = 640;
+			// options->height = 480;
+			// options->width = 640;
+
+			// options->height = 1080;
+			// options->width = 1920;
+
+			options->height = 1232;
+			options->width = 1640;
+
 			options->framerate = 60.0;
+
+			options->useGlesPreview = true;
 			if (options->verbose >= 2)
 			{
 				options->Print();

@@ -84,8 +84,6 @@ Options::Options()
 			"Set the output image width (0 = use default value)")
 		("height", value<unsigned int>(&height)->default_value(0),
 			"Set the output image height (0 = use default value)")
-		("preview,p", value<std::string>(&preview)->default_value("0,0,0,0"),
-			"Set the preview window dimensions, given as x,y,width,height e.g. 0,0,640,480")
 		("shutter", value<std::string>(&shutter_)->default_value("0"),
 			"Set a fixed shutter speed. If no units are provided default to us")
 		("analoggain", value<float>(&gain)->default_value(0),

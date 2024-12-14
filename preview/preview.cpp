@@ -14,33 +14,31 @@ Preview *make_drm_preview(Options const *options);
 
 Preview *make_preview(Options const *options)
 {
+	Preview *p = nullptr;
 	try
 	{
-		Preview *p = make_egl_preview(options);
-		if (p)
+		if (options->useGlesPreview)
 		{
-			LOG(1, "Made X/EGL preview window");
+			p = make_egl_preview(options);
+			if (p)
+			{
+				LOG(1, "Made X/EGL preview window");
+			}
 		}
-		return p;
-	}
-	catch (std::exception const &e)
-	{
-		LOG(1, e.what());
-
-		try
+		else
 		{
-			Preview *p = make_drm_preview(options);
+			p = make_drm_preview(options);
 			if (p)
 			{
 				LOG(1, "Made DRM preview window");
 			}
-			return p;
-		}
-		catch (std::exception const &e)
-		{
-			LOG(1, "Preview window unavailable");
 		}
 	}
+	catch (std::exception const &e)
+	{
+		LOG(1, e.what());
+		return nullptr;
+	}
 
-	return nullptr; // prevents compiler warning in debug builds
+	return p; // prevents compiler warning in debug builds
 }

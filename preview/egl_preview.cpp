@@ -16,12 +16,13 @@
 #include "preview.hpp"
 
 #include <libdrm/drm_fourcc.h>
-
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-// We don't use Status below, so we could consider #undefining it here.
-// We do use None, so if we had to #undefine it we could replace it by zero
-// in what follows below.
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <gbm.h>
 
 #include <epoxy/egl.h>
 #include <epoxy/gl.h>
@@ -31,7 +32,7 @@ class EglPreview : public Preview
 public:
 	EglPreview(Options const *options);
 	~EglPreview();
-	virtual void SetInfoText(const std::string &text) override;
+
 	// Display the buffer. You get given the fd back in the BufferDoneCallback
 	// once its available for re-use.
 	virtual void Show(int fd, libcamera::Span<uint8_t> span, StreamInfo const &info) override;
@@ -39,7 +40,7 @@ public:
 	// show new ones.
 	virtual void Reset() override;
 	// Check if the window manager has closed the preview.
-	virtual bool Quit() override;
+
 	// Return the maximum image size allowed.
 	virtual void MaxImageSize(unsigned int &w, unsigned int &h) const override
 	{
@@ -56,17 +57,20 @@ private:
 		StreamInfo info;
 		GLuint texture;
 	};
-	void makeWindow(char const *name);
+
 	void makeBuffer(int fd, size_t size, StreamInfo const &info, Buffer &buffer);
-	::Display *display_;
+	drmModeConnector *getConnector(drmModeRes *resources);
+	drmModeEncoder *findEncoder(drmModeConnector *connector);
+	void gbmClean();
+	void gl_setup(int width, int height);
+	void gbmSwapBuffers();
+
 	EGLDisplay egl_display_;
-	Window window_;
 	EGLContext egl_context_;
 	EGLSurface egl_surface_;
 	std::map<int, Buffer> buffers_; // map the DMABUF's fd to the Buffer
 	int last_fd_;
 	bool first_time_;
-	Atom wm_delete_window_;
 	// size of preview window
 	int x_;
 	int y_;
@@ -74,7 +78,73 @@ private:
 	int height_;
 	unsigned int max_image_width_;
 	unsigned int max_image_height_;
+
+	int device;
+	uint32_t connectorId;
+	drmModeModeInfo mode;
+	gbm_device *gbmDevice;
+	gbm_surface *gbmSurface;
+	drmModeCrtc *crtc;
+	drmModeRes *resources;
+	drmModeConnector *connector;
+	drmModeEncoder *encoder;
+	gbm_bo *previousBo = nullptr;
+	uint32_t previousFb;
 };
+
+// Get the EGL error back as a string. Useful for debugging.
+static const std::string eglGetErrorStr()
+{
+    switch (eglGetError())
+    {
+    case EGL_SUCCESS:
+        return "The last function succeeded without error.";
+    case EGL_NOT_INITIALIZED:
+        return "EGL is not initialized, or could not be initialized, for the "
+               "specified EGL display connection.";
+    case EGL_BAD_ACCESS:
+        return "EGL cannot access a requested resource (for example a context "
+               "is bound in another thread).";
+    case EGL_BAD_ALLOC:
+        return "EGL failed to allocate resources for the requested operation.";
+    case EGL_BAD_ATTRIBUTE:
+        return "An unrecognized attribute or attribute value was passed in the "
+               "attribute list.";
+    case EGL_BAD_CONTEXT:
+        return "An EGLContext argument does not name a valid EGL rendering "
+               "context.";
+    case EGL_BAD_CONFIG:
+        return "An EGLConfig argument does not name a valid EGL frame buffer "
+               "configuration.";
+    case EGL_BAD_CURRENT_SURFACE:
+        return "The current surface of the calling thread is a window, pixel "
+               "buffer or pixmap that is no longer valid.";
+    case EGL_BAD_DISPLAY:
+        return "An EGLDisplay argument does not name a valid EGL display "
+               "connection.";
+    case EGL_BAD_SURFACE:
+        return "An EGLSurface argument does not name a valid surface (window, "
+               "pixel buffer or pixmap) configured for GL rendering.";
+    case EGL_BAD_MATCH:
+        return "Arguments are inconsistent (for example, a valid context "
+               "requires buffers not supplied by a valid surface).";
+    case EGL_BAD_PARAMETER:
+        return "One or more argument values are invalid.";
+    case EGL_BAD_NATIVE_PIXMAP:
+        return "A NativePixmapType argument does not refer to a valid native "
+               "pixmap.";
+    case EGL_BAD_NATIVE_WINDOW:
+        return "A NativeWindowType argument does not refer to a valid native "
+               "window.";
+    case EGL_CONTEXT_LOST:
+        return "A power management event has occurred. The application must "
+               "destroy all contexts and reinitialise OpenGL ES state and "
+               "objects to continue rendering.";
+    default:
+        break;
+    }
+    return "Unknown error!";
+}
 
 static GLint compile_shader(GLenum target, const char *source)
 {
@@ -130,33 +200,66 @@ static GLint link_program(GLint vs, GLint fs)
 	return prog;
 }
 
-static void gl_setup(int width, int height, int window_width, int window_height)
+void EglPreview::gl_setup(int width, int height)
 {
-	float w_factor = width / (float)window_width;
-	float h_factor = height / (float)window_height;
+	//free(configs);
+	// We will use the screen resolution as the desired width and height for the viewport.
+	int desiredWidth = mode.hdisplay;
+	int desiredHeight = mode.vdisplay;
+	// auto makeCurrentResult = eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+	// std::cout<<makeCurrentResult<<"\n";
+	// Set GL Viewport size, always needed!
+	glViewport(0, 0, desiredWidth, desiredHeight);
+
+	// Get GL Viewport size and test if it is correct.
+	GLint viewport[4];
+	glGetIntegerv(GL_VIEWPORT, viewport);
+
+	// viewport[2] and viewport[3] are viewport width and height respectively
+	printf("GL Viewport size: %dx%d\n", viewport[2], viewport[3]);
+
+	if (viewport[2] != desiredWidth || viewport[3] != desiredHeight)
+	{
+		eglDestroyContext(egl_display_, egl_context_);
+		eglDestroySurface(egl_display_, egl_surface_);
+		eglTerminate(egl_display_);
+		gbmClean();
+		throw std::runtime_error("Error! The glViewport returned incorrect values! Something is wrong!");
+	}
+	// makeCurrentResult = eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	// std::cout<<makeCurrentResult<<"\n";
+
+
+	// TODO: need to setup window_width and window_height
+	float w_factor = width / (float)desiredWidth;
+	float h_factor = height / (float)desiredHeight;
 	float max_dimension = std::max(w_factor, h_factor);
 	w_factor /= max_dimension;
 	h_factor /= max_dimension;
 	char vs[256];
 	snprintf(vs, sizeof(vs),
-			 "attribute vec4 pos;\n"
-			 "varying vec2 texcoord;\n"
-			 "\n"
-			 "void main() {\n"
-			 "  gl_Position = pos;\n"
-			 "  texcoord.x = pos.x / %f + 0.5;\n"
-			 "  texcoord.y = 0.5 - pos.y / %f;\n"
-			 "}\n",
-			 2.0 * w_factor, 2.0 * h_factor);
+		"#version 100\n"
+		"attribute vec4 pos;\n"
+		"varying vec2 texcoord;\n"
+		"\n"
+		"void main() {\n"
+		"  gl_Position = pos;\n"
+		"  texcoord.x = pos.x / %f + 0.5;\n"
+		"  texcoord.y = 0.5 - pos.y / %f;\n"
+		"}\n",
+		2.0 * w_factor, 2.0 * h_factor);
+
 	vs[sizeof(vs) - 1] = 0;
 	GLint vs_s = compile_shader(GL_VERTEX_SHADER, vs);
-	const char *fs = "#extension GL_OES_EGL_image_external : enable\n"
-					 "precision mediump float;\n"
-					 "uniform samplerExternalOES s;\n"
-					 "varying vec2 texcoord;\n"
-					 "void main() {\n"
-					 "  gl_FragColor = texture2D(s, texcoord);\n"
-					 "}\n";
+	const char *fs =
+		"#version 100\n"
+		"#extension GL_OES_EGL_image_external : enable\n"
+	    "precision mediump float;\n"
+		"uniform samplerExternalOES s;\n"
+		"varying vec2 texcoord;\n"
+		"void main() {\n"
+		"  gl_FragColor = texture2D(s, texcoord);\n"
+		"}\n";
 	GLint fs_s = compile_shader(GL_FRAGMENT_SHADER, fs);
 	GLint prog = link_program(vs_s, fs_s);
 
@@ -167,166 +270,247 @@ static void gl_setup(int width, int height, int window_width, int window_height)
 	glEnableVertexAttribArray(0);
 }
 
+drmModeConnector *EglPreview::getConnector(drmModeRes *resources)
+{
+	for (int i = 0; i < resources->count_connectors; i++)
+	{
+		drmModeConnector *connector = drmModeGetConnector(device, resources->connectors[i]);
+		if (connector->connection == DRM_MODE_CONNECTED)
+		{
+			return connector;
+		}
+		drmModeFreeConnector(connector);
+	}
+
+	return nullptr;
+}
+
+drmModeEncoder *EglPreview::findEncoder(drmModeConnector *connector)
+{
+	if (connector->encoder_id)
+	{
+		return drmModeGetEncoder(device, connector->encoder_id);
+	}
+	return nullptr;
+}
+
+void EglPreview::gbmClean()
+{
+	printf("gbmClean");
+	// set the previous crtc
+	drmModeSetCrtc(device, crtc->crtc_id, crtc->buffer_id, crtc->x, crtc->y, &connectorId, 1, &crtc->mode);
+	drmModeFreeCrtc(crtc);
+
+	// if (previousBo)
+	// {
+	// 	drmModeRmFB(device, previousFb);
+	// 	gbm_surface_release_buffer(gbmSurface, previousBo);
+	// }
+
+	gbm_surface_destroy(gbmSurface);
+	gbm_device_destroy(gbmDevice);
+}
+
+static int match_config_to_visual(
+	EGLDisplay egl_display,
+	EGLint visual_id,
+	EGLConfig *configs,
+	int count)
+{
+	int i;
+
+	for (i = 0; i < count; ++i)
+		{
+		EGLint id;
+
+		if (!eglGetConfigAttrib(egl_display, configs[i], EGL_NATIVE_VISUAL_ID, &id))
+		{
+			continue;
+		}
+
+		if (id == visual_id)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+/*
+ * Calculate an accurate refresh rate from 'mode'.
+ * The result is in mHz.
+ */
+// static int refresh_rate(drmModeModeInfo *mode)
+// {
+// 	int res = (mode->clock * 1000000LL / mode->htotal + mode->vtotal / 2) / mode->vtotal;
+//
+// 	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
+// 		res *= 2;
+//
+// 	if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
+// 		res /= 2;
+//
+// 	if (mode->vscan > 1)
+// 		res /= mode->vscan;
+//
+// 	return res;
+// }
+
 EglPreview::EglPreview(Options const *options) : Preview(options), last_fd_(-1), first_time_(true)
 {
-	display_ = XOpenDisplay(NULL);
-	if (!display_)
-		throw std::runtime_error("Couldn't open X display");
+	device = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+	resources = drmModeGetResources(device);
+	if (resources == nullptr)
+	{
+		throw std::runtime_error("Unable to get DRM resources");
+	}
 
-	egl_display_ = eglGetDisplay(display_);
+	connector = getConnector(resources);
+	if (connector == nullptr)
+	{
+		drmModeFreeResources(resources);
+		throw std::runtime_error("Unable to get connector");
+	}
+
+	connectorId = connector->connector_id;
+	auto modesArray = std::vector<drmModeModeInfo>(connector->modes, connector->modes + connector->count_modes);
+	//mode = connector->modes[0];
+	auto searchResult = std::find_if(
+		modesArray.begin(), modesArray.end(),
+		[](const auto& x) { return x.hdisplay == 1920 && x.vdisplay == 1080;});
+	if (searchResult == modesArray.end())
+	{
+		throw std::runtime_error("Unable to find mode");
+	}
+	mode = *searchResult;
+	printf("resolution: %ix%i\n", mode.hdisplay, mode.vdisplay);
+
+	// for (int j = 0; j < connector->count_modes; ++j) {
+	// 	drmModeModeInfo *mode = &connector->modes[j];
+	//
+	// 	printf("  hdisplay:%i vdisplay:%i flags:%x interlace:%s refresh_rate:%.02f\n",
+	// 		mode->hdisplay, mode->vdisplay,
+	// 		mode->flags,
+	// 		mode->flags & DRM_MODE_FLAG_INTERLACE ? "i" : "",
+	// 		refresh_rate(mode) / 1000.0);
+	// }
+
+	encoder = findEncoder(connector);
+	if (encoder == NULL)
+	{
+		drmModeFreeConnector(connector);
+		drmModeFreeResources(resources);
+		throw std::runtime_error("Unable to get encoder");
+	}
+
+	crtc = drmModeGetCrtc(device, encoder->crtc_id);
+	// drmModeFreeEncoder(encoder);
+	// drmModeFreeConnector(connector);
+	// drmModeFreeResources(resources);
+	gbmDevice  = gbm_create_device(device);
+	if (!gbmDevice)
+	{
+		throw std::runtime_error("Couldn't open GBM display");
+	}
+
+	gbmSurface = gbm_surface_create(gbmDevice, mode.hdisplay, mode.vdisplay, GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	egl_display_ = eglGetDisplay(gbmDevice);
 	if (!egl_display_)
+	{
 		throw std::runtime_error("eglGetDisplay() failed");
-
-	EGLint egl_major, egl_minor;
-
-	if (!eglInitialize(egl_display_, &egl_major, &egl_minor))
-		throw std::runtime_error("eglInitialize() failed");
-
-	x_ = 0;
-	y_ = 0;
-	width_ = 0;
-	height_ = 0;
-	makeWindow("rpicam-app");
-
-	// gl_setup() has to happen later, once we're sure we're in the display thread.
-}
-
-EglPreview::~EglPreview()
-{
-	EglPreview::Reset();
-	eglDestroyContext(egl_display_, egl_context_);
-}
-
-static void no_border(Display *display, Window window)
-{
-	static const unsigned MWM_HINTS_DECORATIONS = (1 << 1);
-	static const int PROP_MOTIF_WM_HINTS_ELEMENTS = 5;
-
-	typedef struct
-	{
-		unsigned long flags;
-		unsigned long functions;
-		unsigned long decorations;
-		long inputMode;
-		unsigned long status;
-	} PropMotifWmHints;
-
-	PropMotifWmHints motif_hints;
-	Atom prop, proptype;
-	unsigned long flags = 0;
-
-	/* setup the property */
-	motif_hints.flags = MWM_HINTS_DECORATIONS;
-	motif_hints.decorations = flags;
-
-	/* get the atom for the property */
-	prop = XInternAtom(display, "_MOTIF_WM_HINTS", True);
-	if (!prop)
-	{
-		/* something went wrong! */
-		return;
 	}
 
-	/* not sure this is correct, seems to work, XA_WM_HINTS didn't work */
-	proptype = prop;
+	// Other variables we will need further down the code.
+    int major, minor;
+    //GLuint program, vert, frag, vbo;
+    //GLint posLoc, colorLoc, result;
 
-	XChangeProperty(display, window, /* display, window */
-					prop, proptype, /* property, type */
-					32, /* format: 32-bit datums */
-					PropModeReplace, /* mode */
-					(unsigned char *)&motif_hints, /* data */
-					PROP_MOTIF_WM_HINTS_ELEMENTS /* nelements */
-	);
-}
+    if (eglInitialize(egl_display_, &major, &minor) == EGL_FALSE)
+    {
+        eglTerminate(egl_display_);
+        gbmClean();
+    	throw std::runtime_error("Failed to get EGL version! Error: " + eglGetErrorStr());
+    }
 
-void EglPreview::makeWindow(char const *name)
-{
-	int screen_num = DefaultScreen(display_);
-	XSetWindowAttributes attr;
-	unsigned long mask;
-	Window root = RootWindow(display_, screen_num);
+    // Make sure that we can use OpenGL in this EGL app.
+    eglBindAPI(EGL_OPENGL_ES_API);
 
-	// Default behaviour here is to use a 1024x768 window.
-	if (width_ == 0 || height_ == 0)
-	{
-		width_ = 1024;
-		height_ = 768;
-	}
+    printf("Initialized EGL version: %d.%d\n", major, minor);
 
-
-	x_ = y_ = 0;
-	width_ = DisplayWidth(display_, screen_num);
-	height_ = DisplayHeight(display_, screen_num);
-
+    // EGLint count;
+    // EGLint numConfigs;
+    // eglGetConfigs(egl_display_, NULL, 0, &count);
+    // EGLConfig *configs = malloc(count * sizeof(configs));
 
 	static const EGLint attribs[] =
 		{
-			EGL_RED_SIZE, 1,
-			EGL_GREEN_SIZE, 1,
-			EGL_BLUE_SIZE, 1,
-			EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-			EGL_NONE
-		};
-	EGLConfig config;
-	EGLint num_configs;
-	if (!eglChooseConfig(egl_display_, attribs, &config, 1, &num_configs))
-		throw std::runtime_error("couldn't get an EGL visual config");
-
-	EGLint vid;
-	if (!eglGetConfigAttrib(egl_display_, config, EGL_NATIVE_VISUAL_ID, &vid))
-		throw std::runtime_error("eglGetConfigAttrib() failed\n");
-
-	XVisualInfo visTemplate = {};
-	visTemplate.visualid = (VisualID)vid;
-	int num_visuals;
-	XVisualInfo *visinfo = XGetVisualInfo(display_, VisualIDMask, &visTemplate, &num_visuals);
-
-	/* window attributes */
-	attr.background_pixel = 0;
-	attr.border_pixel = 0;
-	attr.colormap = XCreateColormap(display_, root, visinfo->visual, AllocNone);
-	attr.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask;
-	/* XXX this is a bad way to get a borderless window! */
-	mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
-
-	window_ = XCreateWindow(display_, root, x_, y_, width_, height_, 0, visinfo->depth, InputOutput, visinfo->visual,
-							mask, &attr);
-
-	no_border(display_, window_);
-
-	/* set hints and properties */
-	{
-		XSizeHints sizehints;
-		sizehints.x = x_;
-		sizehints.y = y_;
-		sizehints.width = width_;
-		sizehints.height = height_;
-		sizehints.flags = USSize | USPosition;
-		XSetNormalHints(display_, window_, &sizehints);
-		XSetStandardProperties(display_, window_, name, name, None, (char **)NULL, 0, &sizehints);
-	}
-
-	eglBindAPI(EGL_OPENGL_ES_API);
-
-	static const EGLint ctx_attribs[] = {
-		EGL_CONTEXT_CLIENT_VERSION, 2,
+		EGL_RED_SIZE, 1,
+		EGL_GREEN_SIZE, 1,
+		EGL_BLUE_SIZE, 1,
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
 		EGL_NONE
 	};
-	egl_context_ = eglCreateContext(egl_display_, config, EGL_NO_CONTEXT, ctx_attribs);
-	if (!egl_context_)
-		throw std::runtime_error("eglCreateContext failed");
 
-	XFree(visinfo);
+	EGLint count = 0;
+	EGLint matched = 0;
+	int config_index = -1;
 
-	XMapWindow(display_, window_);
+	if (!eglGetConfigs(egl_display_, NULL, 0, &count) || count < 1) {
+		printf("No EGL configs to choose from.\n");
+	}
+	EGLConfig *configs = (EGLConfig*)malloc(count * sizeof *configs);
+	if (!configs)
+	{
+		printf("malloc error");
+	}
 
-	// This stops the window manager from closing the window, so we get an event instead.
-	wm_delete_window_ = XInternAtom(display_, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(display_, window_, &wm_delete_window_, 1);
+	if (!eglChooseConfig(egl_display_, attribs, configs, count, &matched) || !matched)
+	{
+		printf("No EGL configs with appropriate attributes.\n");
+	}
 
-	egl_surface_ = eglCreateWindowSurface(egl_display_, config, reinterpret_cast<EGLNativeWindowType>(window_), NULL);
-	if (!egl_surface_)
-		throw std::runtime_error("eglCreateWindowSurface failed");
+	auto visual_id = DRM_FORMAT_XRGB8888;
+	if (!visual_id)
+	{
+		config_index = 0;
+	}
+
+	if (config_index == -1)
+		config_index = match_config_to_visual(
+			egl_display_,
+			visual_id,
+			configs,
+			matched);
+
+	EGLConfig config;
+	if (config_index != -1)
+	{
+		config = configs[config_index];
+	}
+
+	static const EGLint ctx_attribs[] = {
+    	EGL_CONTEXT_CLIENT_VERSION, 2,
+		EGL_NONE
+	};
+    egl_context_ = eglCreateContext(egl_display_, config, EGL_NO_CONTEXT, ctx_attribs);
+    if (egl_context_ == EGL_NO_CONTEXT)
+    {
+        eglTerminate(egl_display_);
+        gbmClean();
+    	throw std::runtime_error("Failed to create EGL context! Error: " + eglGetErrorStr());
+    }
+
+    egl_surface_ = eglCreateWindowSurface(egl_display_, config, (EGLNativeWindowType)gbmSurface, NULL);
+    if (egl_surface_ == EGL_NO_SURFACE)
+    {
+        eglDestroyContext(egl_display_, egl_context_);
+        eglTerminate(egl_display_);
+        gbmClean();
+    	throw std::runtime_error("Failed to create EGL surface! Error: " + eglGetErrorStr());
+    }
+
+	free(configs);
 
 	// We have to do eglMakeCurrent in the thread where it will run, but we must do it
 	// here temporarily so as to get the maximum texture size.
@@ -336,6 +520,15 @@ void EglPreview::makeWindow(char const *name)
 	max_image_width_ = max_image_height_ = max_texture_size;
 	// This "undoes" the previous eglMakeCurrent.
 	eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+
+	// gl_setup() has to happen later, once we're sure we're in the display thread.
+}
+
+EglPreview::~EglPreview()
+{
+	printf("GL destroy");
+	EglPreview::Reset();
+	eglDestroyContext(egl_display_, egl_context_);
 }
 
 static void get_colour_space_info(std::optional<libcamera::ColorSpace> const &cs, EGLint &encoding, EGLint &range)
@@ -357,10 +550,14 @@ void EglPreview::makeBuffer(int fd, size_t size, StreamInfo const &info, Buffer 
 {
 	if (first_time_)
 	{
+		auto makeCurrentResult = eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
 		// This stuff has to be delayed until we know we're in the thread doing the display.
-		if (!eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_))
-			throw std::runtime_error("eglMakeCurrent failed");
-		gl_setup(info.width, info.height, width_, height_);
+		if (!makeCurrentResult)
+		{
+			throw std::runtime_error("eglMakeCurrent failed" + eglGetErrorStr());
+		}
+
+		gl_setup(info.width, info.height);
 		first_time_ = false;
 	}
 
@@ -402,12 +599,6 @@ void EglPreview::makeBuffer(int fd, size_t size, StreamInfo const &info, Buffer 
 	eglDestroyImageKHR(egl_display_, image);
 }
 
-void EglPreview::SetInfoText(const std::string &text)
-{
-	if (!text.empty())
-		XStoreName(display_, window_, text.c_str());
-}
-
 void EglPreview::Show(int fd, libcamera::Span<uint8_t> span, StreamInfo const &info)
 {
 	Buffer &buffer = buffers_[fd];
@@ -419,32 +610,59 @@ void EglPreview::Show(int fd, libcamera::Span<uint8_t> span, StreamInfo const &i
 
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, buffer.texture);
 	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-	EGLBoolean success [[maybe_unused]] = eglSwapBuffers(egl_display_, egl_surface_);
+	gbmSwapBuffers();
 	if (last_fd_ >= 0)
+	{
 		done_callback_(last_fd_);
+	}
+
 	last_fd_ = fd;
+}
+
+void EglPreview::gbmSwapBuffers()
+{
+	eglSwapBuffers(egl_display_, egl_surface_);
+	struct gbm_bo *bo = gbm_surface_lock_front_buffer(gbmSurface);
+	uint32_t handle = gbm_bo_get_handle(bo).u32;
+	uint32_t pitch = gbm_bo_get_stride(bo);
+	uint32_t fb;
+	drmModeAddFB(device, mode.hdisplay, mode.vdisplay, 24, 32, pitch, handle, &fb);
+	drmModeSetCrtc(device, crtc->crtc_id, fb, 0, 0, &connectorId, 1, &mode);
+
+	if (previousBo)
+	{
+		drmModeRmFB(device, previousFb);
+		gbm_surface_release_buffer(gbmSurface, previousBo);
+	}
+
+	previousBo = bo;
+	previousFb = fb;
 }
 
 void EglPreview::Reset()
 {
+	std::cout << "RESET!";
+
 	for (auto &it : buffers_)
 		glDeleteTextures(1, &it.second.texture);
 	buffers_.clear();
 	last_fd_ = -1;
+
 	eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 	first_time_ = true;
 }
 
-bool EglPreview::Quit()
-{
-	XEvent event;
-	while (XCheckTypedWindowEvent(display_, window_, ClientMessage, &event))
-	{
-		if (static_cast<Atom>(event.xclient.data.l[0]) == wm_delete_window_)
-			return true;
-	}
-	return false;
-}
+// bool EglPreview::Quit()
+// {
+// 	std::cout<<"QUIT!!!\n";
+// 	eglDestroyContext(egl_display_, egl_context_);
+// 	eglDestroySurface(egl_display_, egl_surface_);
+// 	eglTerminate(egl_display_);
+// 	gbmClean();
+//
+// 	close(device);
+// 	return false;
+// }
 
 Preview *make_egl_preview(Options const *options)
 {

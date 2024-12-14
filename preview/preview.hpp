@@ -33,8 +33,6 @@ public:
 	// Reset the preview window, clearing the current buffers and being ready to
 	// show new ones.
 	virtual void Reset() = 0;
-	// Check if preview window has been shut down.
-	virtual bool Quit() { return false; }
 	// Return the maximum image size allowed.
 	virtual void MaxImageSize(unsigned int &w, unsigned int &h) const = 0;
 
